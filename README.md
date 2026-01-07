@@ -99,6 +99,19 @@ Then configure your MCP client:
 }
 ```
 
+## Transport Modes
+
+The Vikunja MCP server supports both HTTP/SSE and stdio transports, with **HTTP as the default**. See [HTTP_TRANSPORT.md](HTTP_TRANSPORT.md) for detailed HTTP transport documentation.
+
+### HTTP/SSE Transport (Default)
+HTTP-based transport for web integration and remote access. Runs automatically by default on port 3000.
+
+### Stdio Transport
+Traditional stdio transport for direct process communication with MCP clients. Enable with:
+```bash
+MCP_TRANSPORT=stdio node dist/index.js
+```
+
 ## Configuration
 
 ### Logging Configuration
@@ -1279,6 +1292,12 @@ DEBUG=true
 
 # Set log level (error, warn, info, debug)
 LOG_LEVEL=debug
+```
+
+#### Transport Configuration
+```bash
+# Transport mode (default: http, runs on port 3000)
+MCP_TRANSPORT=http              # Options: http, sse, stdio
 ```
 
 #### Security & Performance Configuration

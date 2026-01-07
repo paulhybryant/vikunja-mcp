@@ -58,7 +58,9 @@
     "@modelcontextprotocol/sdk": "^1.20.2",
     "async-mutex": "^0.5.0",
     "better-sqlite3": "^12.4.1",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "express": "^4.21.2",
     "express-rate-limit": "^8.2.1",
     "jsonata": "^2.1.0",
     "node-vikunja": "^0.4.0",
@@ -69,6 +71,8 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^24.3.0",

@@ -7,6 +7,11 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import express from 'express';
+import type { Request, Response } from 'express';
+import type { ServerResponse } from 'http';
+import cors from 'cors';
 import dotenv from 'dotenv';
 
 import { AuthManager } from './auth/AuthManager';
@@ -79,17 +84,99 @@ if (process.env.VIKUNJA_URL && process.env.VIKUNJA_API_TOKEN) {
   logger.info(`Using detected auth type: ${detectedAuthType}`);
 }
 
-// Start the server
+// Store active SSE transports by session ID
+const transports: Record<string, SSEServerTransport> = {};
+
+// Start the server with HTTP transport
+function startHttpServer(): void {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+  const app = express();
+  const port = 3000;
+
+  // Middleware
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  app.use(cors());
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  app.use(express.json());
+
+  // Health check endpoint
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  app.get('/health', (_req: Request, res: Response) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+    res.json({ status: 'ok', name: 'vikunja-mcp', version: '0.2.0' });
+  });
+
+  // SSE endpoint for MCP
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  app.get('/sse', async (_req: Request, res: Response) => {
+    logger.info('New SSE connection established');
+
+    // SSEServerTransport expects a native Node.js ServerResponse, not Express Response
+    // Express Response extends Node.js ServerResponse, so this cast is safe
+    const nodeRes = res as unknown as ServerResponse;
+    const transport = new SSEServerTransport('/message', nodeRes);
+
+    // Store the transport by session ID
+    transports[transport.sessionId] = transport;
+
+    // Clean up transport on connection close
+    res.on('close', () => {
+      logger.info(`SSE connection closed for session ${transport.sessionId}`);
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete transports[transport.sessionId];
+    });
+
+    // Connect the transport to the server
+    await server.connect(transport);
+
+    logger.info(`MCP server connected via SSE transport (session: ${transport.sessionId})`);
+  });
+
+  // POST endpoint for messages (required by SSE transport)
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  app.post('/message', async (req: Request, res: Response) => {
+    const sessionId = req.query.sessionId as string | undefined;
+
+    if (!sessionId) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      res.status(400).send('Missing sessionId query parameter');
+      return;
+    }
+
+    const transport = transports[sessionId];
+
+    if (!transport) {
+      logger.warn(`No transport found for session ${sessionId}`);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+      res.status(400).send('No transport found for sessionId');
+      return;
+    }
+
+    // Let the SSE transport handle the incoming message
+    await transport.handlePostMessage(req, res, req.body);
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
+  app.listen(port, () => {
+    logger.info(`Vikunja MCP HTTP server listening on port ${port}`);
+    logger.info(`SSE endpoint available at http://localhost:${port}/sse`);
+    logger.info(`Health check available at http://localhost:${port}/health`);
+  });
+}
+
+// Start the server with stdio transport
+async function startStdioServer(): Promise<void> {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  logger.info('Vikunja MCP server started with stdio transport');
+}
+
+// Main entry point - choose transport based on environment
 async function main(): Promise<void> {
   // Tools are already registered during module initialization
   // Wait for factory initialization to complete before starting server
   await factoryInitializationPromise;
 
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  logger.info('Vikunja MCP server started');
-  
   // Create secure configuration for logging
   const config = createSecureLogConfig({
     mode: process.env.MCP_MODE,
@@ -98,8 +185,18 @@ async function main(): Promise<void> {
     url: process.env.VIKUNJA_URL,
     token: process.env.VIKUNJA_API_TOKEN,
   });
-  
+
   logger.debug('Configuration loaded', config);
+
+  // Determine transport type from environment variable (default: http)
+  const transport = process.env.MCP_TRANSPORT || 'http';
+
+  if (transport === 'stdio') {
+    await startStdioServer();
+  } else {
+    // Default to HTTP/SSE transport
+    startHttpServer();
+  }
 }
 
 // Only start the server if not in test environment
